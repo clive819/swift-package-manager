@@ -234,7 +234,7 @@ public final class Target {
         ///   - name: The name of the plug-in target.
         ///   - package: The name of the package that defines the plug-in target.
         ///   - condition: The condition under which the plug-in is applied.
-        case pluginItem(name: String, package: String?, condition: PluginUsageCondition?)
+        case pluginWithCondition(name: String, package: String?, condition: PluginUsageCondition?)
     }
 
     /// Construct a target.
@@ -1591,7 +1591,7 @@ extension Target.PluginUsage {
         guard let condition else {
             return .plugin(name: name, package: nil)
         }
-        return .pluginItem(name: name, package: nil, condition: condition)
+        return .pluginWithCondition(name: name, package: nil, condition: condition)
     }
 
     /// Specifies use of a plugin target in the same or another package.
@@ -1606,7 +1606,7 @@ extension Target.PluginUsage {
         guard let condition else {
             return .plugin(name: name, package: package)
         }
-        return .pluginItem(name: name, package: package, condition: condition)
+        return .pluginWithCondition(name: name, package: package, condition: condition)
     }
 }
 

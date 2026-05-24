@@ -303,7 +303,7 @@ extension Serialization.PluginUsage {
         switch usage {
         case .plugin(let name, let package):
             self = .plugin(name: name, package: package, condition: nil)
-        case .pluginItem(let name, let package, let condition):
+        case .pluginWithCondition(let name, let package, let condition):
             self = .plugin(name: name, package: package, condition: condition.map { .init($0) })
         }
     }
