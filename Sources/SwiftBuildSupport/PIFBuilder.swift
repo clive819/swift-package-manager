@@ -233,7 +233,8 @@ public final class PIFBuilder {
         let outputDir = self.parameters.pluginWorkingDirectory.appending("outputs")
 
         let pluginsPerModule = graph.pluginsPerModule(
-            satisfying: buildParameters.buildEnvironment // .buildEnvironment(for: .host)
+            satisfyingHost: hostBuildParameters.buildEnvironment,
+            targetEnvironment: buildParameters.buildEnvironment
         )
 
         let availablePluginTools = try await availableBuildPluginTools(
@@ -258,7 +259,12 @@ public final class PIFBuilder {
                 var buildCommands: [PackagePIFBuilder.CustomBuildCommand] = []
                 var prebuildCommands: [BuildToolPluginInvocationResult.PrebuildCommand] = []
 
-                for plugin in module.pluginDependencies(satisfying: buildParameters.buildEnvironment) {
+                let enabledTraits = package.enabledTraits ?? []
+                for plugin in module.pluginDependencies(
+                    satisfying: hostBuildParameters.buildEnvironment,
+                    targetEnvironment: buildParameters.buildEnvironment,
+                    enabledTraits: enabledTraits
+                ) {
                     let pluginModule = plugin.underlying as! PluginModule
 
                     // Determine the tools to which this plugin has access, and create a name-to-path mapping from tool
@@ -316,18 +322,18 @@ public final class PIFBuilder {
 
                     let result = try await pluginModule.invoke(
                         module: plugin,
-                        action: .createBuildToolCommands(
+                        action: PluginAction.createBuildToolCommands(
                             package: package,
                             target: module,
                             pluginGeneratedSources: pluginDerivedSources.paths,
                             pluginGeneratedResources: pluginDerivedResources.map(\.path)
                         ),
-                        buildEnvironment: buildParameters.buildEnvironment,
-                        workers: buildParameters.workers,
+                        buildEnvironment: hostBuildParameters.buildEnvironment,
+                        workers: hostBuildParameters.workers,
                         scriptRunner: pluginScriptRunner,
                         workingDirectory: package.path,
                         outputDirectory: pluginOutputDir,
-                        toolSearchDirectories: [buildParameters.toolchain.swiftCompilerPath.parentDirectory],
+                        toolSearchDirectories: [hostBuildParameters.toolchain.swiftCompilerPath.parentDirectory],
                         accessibleTools: accessibleTools,
                         writableDirectories: writableDirectories,
                         readOnlyDirectories: readOnlyDirectories,

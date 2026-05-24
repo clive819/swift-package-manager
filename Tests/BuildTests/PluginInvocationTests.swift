@@ -61,7 +61,7 @@ final class PluginInvocationTests: XCTestCase {
                         TargetDescription(
                             name: "Foo",
                             type: .regular,
-                            pluginUsages: [.plugin(name: "FooPlugin", package: nil)]
+                            pluginUsages: [.plugin(name: "FooPlugin", package: nil, condition: nil)]
                         ),
                         TargetDescription(
                             name: "FooPlugin",
@@ -650,6 +650,231 @@ final class PluginInvocationTests: XCTestCase {
                 XCTAssertFalse(localFileSystem.exists(result.executableFile), "\(result.executableFile.pathString)")
             }
         }
+    }
+
+    func testConditionalPluginUsageHostPlatform() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Plugins/FooPlugin/source.swift",
+            "/Foo/Sources/Foo/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .native)
+        let hostPlatformName = buildParameters.buildEnvironment.platform.name
+
+        let graph = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Foo",
+                    path: "/Foo",
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Foo",
+                            type: .regular,
+                            pluginUsages: [
+                                .plugin(
+                                    name: "FooPlugin",
+                                    package: nil,
+                                    condition: .init(hostPlatformNames: [hostPlatformName])
+                                )
+                            ]
+                        ),
+                        TargetDescription(name: "FooPlugin", type: .plugin, pluginCapability: .buildTool),
+                    ]
+                )
+            ],
+            observabilityScope: observability.topScope
+        )
+
+        XCTAssertNoDiagnostics(observability.diagnostics)
+        let enabled = graph.pluginsPerModule(
+            satisfyingHost: buildParameters.buildEnvironment,
+            targetEnvironment: buildParameters.buildEnvironment
+        )
+        XCTAssertEqual(enabled.count, 1)
+
+        let disabled = graph.pluginsPerModule(
+            satisfyingHost: .init(platform: .linux),
+            targetEnvironment: buildParameters.buildEnvironment
+        )
+        XCTAssertTrue(disabled.isEmpty)
+    }
+
+    func testConditionalPluginUsageTargetPlatform() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Plugins/FooPlugin/source.swift",
+            "/Foo/Sources/Foo/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .native)
+
+        let graph = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Foo",
+                    path: "/Foo",
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Foo",
+                            type: .regular,
+                            pluginUsages: [
+                                .plugin(
+                                    name: "FooPlugin",
+                                    package: nil,
+                                    condition: .init(targetPlatformNames: ["linux"])
+                                )
+                            ]
+                        ),
+                        TargetDescription(name: "FooPlugin", type: .plugin, pluginCapability: .buildTool),
+                    ]
+                )
+            ],
+            observabilityScope: observability.topScope
+        )
+
+        XCTAssertNoDiagnostics(observability.diagnostics)
+        let enabled = graph.pluginsPerModule(
+            satisfyingHost: buildParameters.buildEnvironment,
+            targetEnvironment: .init(platform: .linux)
+        )
+        XCTAssertEqual(enabled.count, 1)
+
+        let disabled = graph.pluginsPerModule(
+            satisfyingHost: buildParameters.buildEnvironment,
+            targetEnvironment: .init(platform: .macOS)
+        )
+        XCTAssertTrue(disabled.isEmpty)
+    }
+
+    func testConditionalPluginUsageTraits() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Plugins/FooPlugin/source.swift",
+            "/Foo/Sources/Foo/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+        let manifest = Manifest.createRootManifest(
+            displayName: "Foo",
+            path: "/Foo",
+            products: [
+                try ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+            ],
+            targets: [
+                try TargetDescription(
+                    name: "Foo",
+                    type: .regular,
+                    pluginUsages: [
+                        .plugin(
+                            name: "FooPlugin",
+                            package: nil,
+                            condition: .init(traits: ["Lint"])
+                        )
+                    ]
+                ),
+                try TargetDescription(name: "FooPlugin", type: .plugin, pluginCapability: .buildTool),
+            ],
+            traits: [TraitDescription(name: "Lint")]
+        )
+
+        let graphWithoutTrait = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [manifest],
+            observabilityScope: observability.topScope
+        )
+        XCTAssertTrue(graphWithoutTrait.pluginsPerModule(
+            satisfyingHost: .init(platform: .macOS),
+            targetEnvironment: .init(platform: .macOS)
+        ).isEmpty)
+
+        var enabledTraitsMap = EnabledTraitsMap()
+        enabledTraitsMap[manifest.packageIdentity] = EnabledTraits(["Lint"], setBy: .traitConfiguration)
+        let graphWithTrait = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [manifest],
+            observabilityScope: observability.topScope,
+            enabledTraitsMap: enabledTraitsMap
+        )
+        XCTAssertEqual(
+            graphWithTrait.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).count,
+            1
+        )
+    }
+
+    func testConditionalPluginUsageProductPlugin() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Sources/Foo/source.swift",
+            "/Bar/Plugins/BarPlugin/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+
+        let graph = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Foo",
+                    path: "/Foo",
+                    dependencies: [
+                        .fileSystem(
+                            identity: .plain("bar"),
+                            nameForTargetDependencyResolutionOnly: "Bar",
+                            path: "/Bar",
+                            productFilter: .everything
+                        )
+                    ],
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Foo",
+                            type: .regular,
+                            pluginUsages: [
+                                .plugin(
+                                    name: "BarPlugin",
+                                    package: "Bar",
+                                    condition: .init(hostPlatformNames: ["macos"])
+                                )
+                            ]
+                        )
+                    ]
+                ),
+                Manifest.createFileSystemManifest(
+                    displayName: "Bar",
+                    path: "/Bar",
+                    products: [
+                        ProductDescription(name: "BarPlugin", type: .plugin, targets: ["BarPlugin"])
+                    ],
+                    targets: [
+                        TargetDescription(name: "BarPlugin", type: .plugin, pluginCapability: .buildTool),
+                    ]
+                ),
+            ],
+            observabilityScope: observability.topScope
+        )
+
+        XCTAssertNoDiagnostics(observability.diagnostics)
+        XCTAssertEqual(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).count,
+            1
+        )
+        XCTAssertTrue(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .linux),
+                targetEnvironment: .init(platform: .macOS)
+            ).isEmpty
+        )
     }
 
     func testUnsupportedDependencyProduct() async throws {
@@ -1546,7 +1771,8 @@ final class PluginInvocationTests: XCTestCase {
         observabilityScope: ObservabilityScope
     ) async throws -> [ResolvedModule.ID: (target: ResolvedModule, results: [BuildToolPluginInvocationResult])] {
         let pluginsPerModule = graph.pluginsPerModule(
-            satisfying: buildParameters.buildEnvironment
+            satisfyingHost: buildParameters.buildEnvironment,
+            targetEnvironment: buildParameters.buildEnvironment
         )
 
         let plugins = pluginsPerModule.values.reduce(into: IdentifiableSet<ResolvedModule>()) { result, plugins in
@@ -1571,7 +1797,8 @@ final class PluginInvocationTests: XCTestCase {
                 for: module,
                 destination: .target,
                 configuration: pluginConfiguration,
-                buildParameters: buildParameters,
+                hostBuildParameters: buildParameters,
+                targetBuildEnvironment: buildParameters.buildEnvironment,
                 modulesGraph: graph,
                 tools: mockPluginTools(
                     plugins: plugins,

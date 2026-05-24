@@ -522,7 +522,7 @@ class PrebuiltsBuildPlanTests: XCTestCase {
                             ],
                             type: .executable,
                             pluginUsages: [
-                                .plugin(name: "Plugin", package: "MyPackage")
+                                .plugin(name: "Plugin", package: "MyPackage", condition: nil)
                             ],
                         ),
                         TargetDescription(

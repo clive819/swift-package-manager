@@ -150,11 +150,11 @@ public final class ResolvedTargetResult {
     }
 
     public func check(dependencies: String..., sourceLocation: SourceLocation = #_sourceLocation) {
-        #expect(Set(dependencies) == Set(target.dependencies.map({ $0.name })), sourceLocation: sourceLocation)
+        #expect(Set(dependencies) == Set(target.dependencies.map(\.name) + target.pluginUsages.map(\.name)), sourceLocation: sourceLocation)
     }
 
     public func check(dependencies: [String], sourceLocation: SourceLocation = #_sourceLocation) {
-        #expect(Set(dependencies) == Set(target.dependencies.map({ $0.name })), sourceLocation: sourceLocation)
+        #expect(Set(dependencies) == Set(target.dependencies.map(\.name) + target.pluginUsages.map(\.name)), sourceLocation: sourceLocation)
     }
 
     public func checkDependency(

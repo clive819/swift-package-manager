@@ -7455,7 +7455,7 @@ class BuildPlanTestCase: BuildSystemProviderTestCase {
                     TargetDescription(name: "MyMacro2", dependencies: ["CLib2"], type: .macro),
                     TargetDescription(name: "MyPluginTool2", dependencies: ["CLib2"], type: .executable),
                     TargetDescription(name: "MyPlugin2", dependencies: ["MyPluginTool2"], type: .plugin, pluginCapability: .buildTool),
-                    TargetDescription(name: "MyLib2", dependencies: ["CLib2", "MyMacro2"], pluginUsages: [.plugin(name: "MyPlugin2", package: nil)]),
+                    TargetDescription(name: "MyLib2", dependencies: ["CLib2", "MyMacro2"], pluginUsages: [.plugin(name: "MyPlugin2", package: nil, condition: nil)]),
                 ]
             ),
             Manifest.createRootManifest(
@@ -7472,7 +7472,7 @@ class BuildPlanTestCase: BuildSystemProviderTestCase {
                     TargetDescription(
                         name: "MyLib",
                         dependencies: ["CLib", "MyMacro", .product(name: "MyLib2", package: "LeakLib")],
-                        pluginUsages: [.plugin(name: "MyPlugin", package: nil)]
+                        pluginUsages: [.plugin(name: "MyPlugin", package: nil, condition: nil)]
                     ),
                     TargetDescription(name: "MyMacroTests", dependencies: ["MyMacro"], type: .test),
                     TargetDescription(
