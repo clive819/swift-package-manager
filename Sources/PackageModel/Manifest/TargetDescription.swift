@@ -192,7 +192,7 @@ public struct TargetDescription: Hashable, Encodable, Sendable {
     /// Represents a target's usage of a plugin target or product.
     public enum PluginUsage: Hashable, Sendable {
         /// A plugin in the same or another package, with an optional condition.
-        case plugin(name: String, package: String?, condition: PluginUsageConditionDescription?)
+        case plugin(name: String, package: String?, condition: PluginUsageConditionDescription? = nil)
 
         /// The condition under which the plugin is applied, if any.
         public var condition: PluginUsageConditionDescription? {

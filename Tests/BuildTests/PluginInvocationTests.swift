@@ -61,7 +61,7 @@ final class PluginInvocationTests: XCTestCase {
                         TargetDescription(
                             name: "Foo",
                             type: .regular,
-                            pluginUsages: [.plugin(name: "FooPlugin", package: nil, condition: nil)]
+                            pluginUsages: [.plugin(name: "FooPlugin", package: nil)]
                         ),
                         TargetDescription(
                             name: "FooPlugin",
@@ -1069,7 +1069,7 @@ final class PluginInvocationTests: XCTestCase {
                             name: "Foo",
                             type: .regular,
                             pluginUsages: [
-                                .plugin(name: "FooPlugin", package: nil, condition: nil)
+                                .plugin(name: "FooPlugin", package: nil)
                             ]
                         ),
                         TargetDescription(name: "FooPlugin", type: .plugin, pluginCapability: .buildTool),
@@ -1116,7 +1116,7 @@ final class PluginInvocationTests: XCTestCase {
                             pluginUsages: [
                                 .plugin(name: "PluginA", package: nil, condition: .init(hostPlatformNames: ["macos"])),
                                 .plugin(name: "PluginB", package: nil, condition: .init(targetPlatformNames: ["linux"])),
-                                .plugin(name: "PluginC", package: nil, condition: nil),
+                                .plugin(name: "PluginC", package: nil),
                             ]
                         ),
                         TargetDescription(name: "PluginA", type: .plugin, pluginCapability: .buildTool),

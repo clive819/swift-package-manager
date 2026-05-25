@@ -269,7 +269,7 @@ struct PrebuiltsPIFTests {
                             ],
                             type: .executable,
                             pluginUsages: [
-                                .plugin(name: "Plugin", package: "MyPackage", condition: nil)
+                                .plugin(name: "Plugin", package: "MyPackage")
                             ],
                         ),
                         TargetDescription(
