@@ -161,7 +161,8 @@ public final class PIFBuilder {
         prettyPrint: Bool = true,
         preservePIFModelStructure: Bool = false,
         printPIFManifestGraphviz: Bool = false,
-        buildParameters: BuildParameters
+        targetBuildParameters: BuildParameters,
+        hostBuildParameters: BuildParameters
     ) async throws -> PIFGenerationResult {
         let encoder = prettyPrint ? JSONEncoder.makeWithDefaults() : JSONEncoder()
 
@@ -169,7 +170,7 @@ public final class PIFBuilder {
             encoder.userInfo[.encodeForSwiftBuild] = true
         }
 
-        let (topLevelObject, modulesAndProducts) = try await self.constructPIF(buildParameters: buildParameters)
+        let (topLevelObject, modulesAndProducts) = try await self.constructPIF(targetBuildParameters: targetBuildParameters, hostBuildParameters: hostBuildParameters)
 
         // Sign the PIF objects before encoding it for Swift Build.
         try PIF.sign(workspace: topLevelObject.workspace)
@@ -199,7 +200,7 @@ public final class PIFBuilder {
     /// Compute the available build tools, and their destination build path for host for each plugin.
     private func availableBuildPluginTools(
         graph: ModulesGraph,
-        buildParameters: BuildParameters,
+        hostBuildParameters: BuildParameters,
         pluginsPerModule: [ResolvedModule.ID: [ResolvedModule]],
         hostTriple: Basics.Triple
     ) async throws -> [ResolvedModule.ID: [String: PluginTool]] {
@@ -211,7 +212,7 @@ public final class PIFBuilder {
                 // names to the corresponding paths. Built tools are assumed to be in the build tools directory.
                 let accessibleTools = try await plugin.preparePluginTools(
                     fileSystem: fileSystem,
-                    environment: buildParameters.buildEnvironment,
+                    environment: hostBuildParameters.buildEnvironment,
                     for: hostTriple
                 ) { name, path in
                     return self.parameters.hostBuildProductsPath.appending(path)
@@ -227,19 +228,20 @@ public final class PIFBuilder {
     /// Constructs all `PackagePIFBuilder` objects used by the `constructPIF` function.
     /// In particular, this is useful for unit testing the complex `PIFBuilder` class.
     func makePIFBuilders(
-        buildParameters: BuildParameters
+        targetBuildParameters: BuildParameters,
+        hostBuildParameters: BuildParameters
     ) async throws -> [(ResolvedPackage, PackagePIFBuilder, any PackagePIFBuilder.BuildDelegate)] {
         let pluginScriptRunner = self.parameters.pluginScriptRunner
         let outputDir = self.parameters.pluginWorkingDirectory.appending("outputs")
 
         let pluginsPerModule = graph.pluginsPerModule(
             satisfyingHost: hostBuildParameters.buildEnvironment,
-            targetEnvironment: buildParameters.buildEnvironment
+            targetEnvironment: targetBuildParameters.buildEnvironment
         )
 
         let availablePluginTools = try await availableBuildPluginTools(
             graph: graph,
-            buildParameters: buildParameters,
+            hostBuildParameters: hostBuildParameters,
             pluginsPerModule: pluginsPerModule,
             hostTriple: try pluginScriptRunner.hostTriple
         )
@@ -262,7 +264,7 @@ public final class PIFBuilder {
                 let enabledTraits = package.enabledTraits ?? []
                 for plugin in module.pluginDependencies(
                     satisfying: hostBuildParameters.buildEnvironment,
-                    targetEnvironment: buildParameters.buildEnvironment,
+                    targetEnvironment: targetBuildParameters.buildEnvironment,
                     enabledTraits: enabledTraits
                 ) {
                     let pluginModule = plugin.underlying as! PluginModule
@@ -278,7 +280,7 @@ public final class PIFBuilder {
                         components: [
                             package.identity.description,
                             module.name,
-                            buildParameters.destination == .host ? "tools" : "destination",
+                            targetBuildParameters.destination == .host ? "tools" : "destination",
                             plugin.name,
                         ]
                     )
@@ -305,14 +307,14 @@ public final class PIFBuilder {
                             target: module,
                             toolsVersion: package.manifest.toolsVersion,
                             additionalFileRules: self.parameters.additionalFileRules,
-                            buildParameters: buildParameters,
+                            buildParameters: targetBuildParameters,
                             buildToolPluginInvocationResults: buildToolPluginResults,
                             prebuildCommandResults: [],
                             observabilityScope: observability.topScope
                         )
                         pluginDerivedSources = Sources(
                                 paths: pluginGeneratedFiles.sources.map(\.self),
-                                root: buildParameters.dataPath
+                                root: targetBuildParameters.dataPath
                             )
                         pluginDerivedResources = pluginGeneratedFiles.resources.values.map(\.self)
                     } else {
@@ -339,7 +341,7 @@ public final class PIFBuilder {
                         readOnlyDirectories: readOnlyDirectories,
                         allowNetworkConnections: [],
                         pkgConfigDirectories: self.parameters.pkgConfigDirectories,
-                        sdkRootPath: buildParameters.toolchain.sdkRootPath,
+                        sdkRootPath: targetBuildParameters.toolchain.sdkRootPath,
                         fileSystem: fileSystem,
                         modulesGraph: self.graph,
                         observabilityScope: observabilityScope
@@ -378,7 +380,7 @@ public final class PIFBuilder {
                         // plugins do not inadvertently use the toolchain stdlib instead of the OS stdlib
                         // when built with a Swift.org toolchain.
                         #if !os(macOS)
-                        let runtimeLibPaths = buildParameters.toolchain.runtimeLibraryPaths
+                        let runtimeLibPaths = targetBuildParameters.toolchain.runtimeLibraryPaths
 
                         // Add paths to swift standard runtime libraries to the library path so that they can be found at runtime
                         for libPath in runtimeLibPaths {
@@ -463,7 +465,8 @@ public final class PIFBuilder {
 
     /// Constructs a `PIF.TopLevelObject` representing the package graph.
     package func constructPIF(
-        buildParameters: BuildParameters
+        targetBuildParameters: BuildParameters,
+        hostBuildParameters: BuildParameters
     ) async throws -> (PIF.TopLevelObject, [PackagePIFBuilder.ModuleOrProduct]) {
         return try await memoize(to: &self.cachedPIF) {
             let rootPackages = self.graph.rootPackages
@@ -471,7 +474,7 @@ public final class PIFBuilder {
                 throw PIFGenerationError.rootPackageNotFound
             }
 
-            let packagesAndPIFBuilders = try await makePIFBuilders(buildParameters: buildParameters)
+            let packagesAndPIFBuilders = try await makePIFBuilders(targetBuildParameters: targetBuildParameters, hostBuildParameters: hostBuildParameters)
 
             var modulesAndProducts: [PackagePIFBuilder.ModuleOrProduct] = []
             let packagesAndPIFProjects = try packagesAndPIFBuilders.map { (package, pifBuilder, _) in
@@ -487,7 +490,7 @@ public final class PIFBuilder {
                     packagesAndProjects: packagesAndPIFProjects,
                     observabilityScope: observabilityScope,
                     modulesGraph: graph,
-                    buildParameters: buildParameters
+                    targetBuildParameters: targetBuildParameters
                 )
             )
 
@@ -563,7 +566,8 @@ public final class PIFBuilder {
 
     // Convenience method for generating PIF.
     public static func generatePIF(
-        buildParameters: BuildParameters,
+        targetBuildParameters: BuildParameters,
+        hostBuildParameters: BuildParameters,
         packageGraph: ModulesGraph,
         fileSystem: FileSystem,
         observabilityScope: ObservabilityScope,
@@ -579,7 +583,7 @@ public final class PIFBuilder {
         hostBuildProductsPath: AbsolutePath
     ) async throws -> PIFGenerationResult {
         let parameters = PIFBuilderParameters(
-            buildParameters,
+            targetBuildParameters,
             supportedSwiftVersions: [],
             pluginScriptRunner: pluginScriptRunner,
             disableSandbox: disableSandbox,
@@ -596,7 +600,7 @@ public final class PIFBuilder {
             fileSystem: fileSystem,
             observabilityScope: observabilityScope
         )
-        return try await builder.generatePIF(preservePIFModelStructure: preservePIFModelStructure, buildParameters: buildParameters)
+        return try await builder.generatePIF(preservePIFModelStructure: preservePIFModelStructure, targetBuildParameters: targetBuildParameters, hostBuildParameters: hostBuildParameters)
     }
 }
 
@@ -713,7 +717,7 @@ fileprivate func buildAggregatePIFProject(
     packagesAndProjects: [(package: ResolvedPackage, project: ProjectModel.Project)],
     observabilityScope: ObservabilityScope,
     modulesGraph: ModulesGraph,
-    buildParameters: BuildParameters
+    targetBuildParameters: BuildParameters
 ) throws -> ProjectModel.Project {
     precondition(!packagesAndProjects.isEmpty)
 
@@ -776,7 +780,7 @@ fileprivate func buildAggregatePIFProject(
                 }
 
                 if let resolvedModule = modulesGraph.module(for: target.name) {
-                    guard modulesGraph.isInRootPackages(resolvedModule, satisfying: buildParameters.buildEnvironment) else {
+                    guard modulesGraph.isInRootPackages(resolvedModule, satisfying: targetBuildParameters.buildEnvironment) else {
                         // Disconnected target, possibly due to platform when condition that isn't satisfied
                         continue
                     }

@@ -129,12 +129,17 @@ public class Module {
 
         public init(hostPlatforms: [Platform] = [], targetPlatforms: [Platform] = [], traits: Set<String>? = nil) {
             precondition(!hostPlatforms.isEmpty || !targetPlatforms.isEmpty || traits != nil)
+            precondition(traits == nil || !traits!.isEmpty, "Use nil instead of empty traits set")
             self.hostPlatforms = hostPlatforms
             self.targetPlatforms = targetPlatforms
             self.traits = traits
         }
 
         /// Returns true if the condition is satisfied by the given build environments and enabled traits.
+        ///
+        /// Each axis uses OR semantics internally (the condition passes if the actual value matches
+        /// ANY of the listed values). Across axes, AND semantics apply (all specified axes must pass).
+        /// For traits: the condition is satisfied if at least one listed trait is enabled.
         public func satisfies(hostEnvironment: BuildEnvironment, targetEnvironment: BuildEnvironment, enabledTraits: Set<String>) -> Bool {
             if !hostPlatforms.isEmpty, !hostPlatforms.contains(hostEnvironment.platform) {
                 return false

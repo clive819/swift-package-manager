@@ -877,6 +877,412 @@ final class PluginInvocationTests: XCTestCase {
         )
     }
 
+    func testConditionalPluginUsageCombinedConditions() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Plugins/FooPlugin/source.swift",
+            "/Foo/Sources/Foo/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+
+        let graph = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Foo",
+                    path: "/Foo",
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Foo",
+                            type: .regular,
+                            pluginUsages: [
+                                .plugin(
+                                    name: "FooPlugin",
+                                    package: nil,
+                                    condition: .init(hostPlatformNames: ["macos"], targetPlatformNames: ["linux"])
+                                )
+                            ]
+                        ),
+                        TargetDescription(name: "FooPlugin", type: .plugin, pluginCapability: .buildTool),
+                    ]
+                )
+            ],
+            observabilityScope: observability.topScope
+        )
+
+        XCTAssertNoDiagnostics(observability.diagnostics)
+
+        // Both match → enabled
+        XCTAssertEqual(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .linux)
+            ).count,
+            1
+        )
+
+        // Host matches, target doesn't → disabled
+        XCTAssertTrue(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).isEmpty
+        )
+
+        // Target matches, host doesn't → disabled
+        XCTAssertTrue(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .linux),
+                targetEnvironment: .init(platform: .linux)
+            ).isEmpty
+        )
+    }
+
+    func testConditionalPluginUsageTraitsAnySemantic() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Plugins/FooPlugin/source.swift",
+            "/Foo/Sources/Foo/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+        let manifest = Manifest.createRootManifest(
+            displayName: "Foo",
+            path: "/Foo",
+            products: [
+                try ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+            ],
+            targets: [
+                try TargetDescription(
+                    name: "Foo",
+                    type: .regular,
+                    pluginUsages: [
+                        .plugin(
+                            name: "FooPlugin",
+                            package: nil,
+                            condition: .init(traits: ["Lint", "Dev"])
+                        )
+                    ]
+                ),
+                try TargetDescription(name: "FooPlugin", type: .plugin, pluginCapability: .buildTool),
+            ],
+            traits: [TraitDescription(name: "Lint"), TraitDescription(name: "Dev"), TraitDescription(name: "Other")]
+        )
+
+        // Only "Lint" enabled → should be enabled (ANY semantics)
+        var enabledTraitsMap = EnabledTraitsMap()
+        enabledTraitsMap[manifest.packageIdentity] = EnabledTraits(["Lint"], setBy: .traitConfiguration)
+        let graphWithLint = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [manifest],
+            observabilityScope: observability.topScope,
+            enabledTraitsMap: enabledTraitsMap
+        )
+        XCTAssertEqual(
+            graphWithLint.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).count,
+            1
+        )
+
+        // Only "Dev" enabled → should be enabled (ANY semantics)
+        enabledTraitsMap[manifest.packageIdentity] = EnabledTraits(["Dev"], setBy: .traitConfiguration)
+        let graphWithDev = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [manifest],
+            observabilityScope: observability.topScope,
+            enabledTraitsMap: enabledTraitsMap
+        )
+        XCTAssertEqual(
+            graphWithDev.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).count,
+            1
+        )
+
+        // Both enabled → should be enabled
+        enabledTraitsMap[manifest.packageIdentity] = EnabledTraits(["Lint", "Dev"], setBy: .traitConfiguration)
+        let graphWithBoth = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [manifest],
+            observabilityScope: observability.topScope,
+            enabledTraitsMap: enabledTraitsMap
+        )
+        XCTAssertEqual(
+            graphWithBoth.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).count,
+            1
+        )
+
+        // Unrelated trait enabled → should be disabled
+        var otherTraitsMap = EnabledTraitsMap()
+        otherTraitsMap[manifest.packageIdentity] = EnabledTraits(["Other"], setBy: .traitConfiguration)
+        let graphWithOther = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [manifest],
+            observabilityScope: observability.topScope,
+            enabledTraitsMap: otherTraitsMap
+        )
+        XCTAssertTrue(
+            graphWithOther.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).isEmpty
+        )
+
+        // No traits enabled → should be disabled
+        let graphWithNone = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [manifest],
+            observabilityScope: observability.topScope
+        )
+        XCTAssertTrue(
+            graphWithNone.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).isEmpty
+        )
+    }
+
+    func testPluginInBothDependenciesAndPluginUsages() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Plugins/FooPlugin/source.swift",
+            "/Foo/Sources/Foo/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+
+        let graph = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Foo",
+                    path: "/Foo",
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Foo",
+                            type: .regular,
+                            pluginUsages: [
+                                .plugin(name: "FooPlugin", package: nil, condition: nil)
+                            ]
+                        ),
+                        TargetDescription(name: "FooPlugin", type: .plugin, pluginCapability: .buildTool),
+                    ]
+                )
+            ],
+            observabilityScope: observability.topScope
+        )
+
+        XCTAssertNoDiagnostics(observability.diagnostics)
+        let fooModule = graph.allModules.first { $0.name == "Foo" }!
+
+        // Plugin should be in dependencies (for build ordering)
+        let dependencyNames = fooModule.dependencies.map(\.name)
+        XCTAssertTrue(dependencyNames.contains("FooPlugin"))
+
+        // Plugin should also be in pluginUsages (for condition-gated invocation)
+        let pluginNames = fooModule.pluginUsages.map(\.name)
+        XCTAssertTrue(pluginNames.contains("FooPlugin"))
+    }
+
+    func testMultiplePluginsDifferentConditions() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Plugins/PluginA/source.swift",
+            "/Foo/Plugins/PluginB/source.swift",
+            "/Foo/Plugins/PluginC/source.swift",
+            "/Foo/Sources/Foo/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+
+        let graph = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Foo",
+                    path: "/Foo",
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Foo",
+                            type: .regular,
+                            pluginUsages: [
+                                .plugin(name: "PluginA", package: nil, condition: .init(hostPlatformNames: ["macos"])),
+                                .plugin(name: "PluginB", package: nil, condition: .init(targetPlatformNames: ["linux"])),
+                                .plugin(name: "PluginC", package: nil, condition: nil),
+                            ]
+                        ),
+                        TargetDescription(name: "PluginA", type: .plugin, pluginCapability: .buildTool),
+                        TargetDescription(name: "PluginB", type: .plugin, pluginCapability: .buildTool),
+                        TargetDescription(name: "PluginC", type: .plugin, pluginCapability: .buildTool),
+                    ]
+                )
+            ],
+            observabilityScope: observability.topScope
+        )
+
+        XCTAssertNoDiagnostics(observability.diagnostics)
+
+        // Host=macOS, target=linux → all 3
+        let allEnabled = graph.pluginsPerModule(
+            satisfyingHost: .init(platform: .macOS),
+            targetEnvironment: .init(platform: .linux)
+        )
+        XCTAssertEqual(allEnabled.values.flatMap { $0 }.count, 3)
+
+        // Host=macOS, target=macOS → PluginA + PluginC
+        let macTarget = graph.pluginsPerModule(
+            satisfyingHost: .init(platform: .macOS),
+            targetEnvironment: .init(platform: .macOS)
+        )
+        let macTargetNames = Set(macTarget.values.flatMap { $0 }.map(\.name))
+        XCTAssertEqual(macTargetNames, ["PluginA", "PluginC"])
+
+        // Host=linux, target=linux → PluginB + PluginC
+        let linuxHost = graph.pluginsPerModule(
+            satisfyingHost: .init(platform: .linux),
+            targetEnvironment: .init(platform: .linux)
+        )
+        let linuxHostNames = Set(linuxHost.values.flatMap { $0 }.map(\.name))
+        XCTAssertEqual(linuxHostNames, ["PluginB", "PluginC"])
+    }
+
+    func testConditionalPluginUsageMultiplePlatforms() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Plugins/FooPlugin/source.swift",
+            "/Foo/Sources/Foo/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+
+        let graph = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Foo",
+                    path: "/Foo",
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Foo",
+                            type: .regular,
+                            pluginUsages: [
+                                .plugin(
+                                    name: "FooPlugin",
+                                    package: nil,
+                                    condition: .init(hostPlatformNames: ["macos", "linux"])
+                                )
+                            ]
+                        ),
+                        TargetDescription(name: "FooPlugin", type: .plugin, pluginCapability: .buildTool),
+                    ]
+                )
+            ],
+            observabilityScope: observability.topScope
+        )
+
+        XCTAssertNoDiagnostics(observability.diagnostics)
+
+        // macOS matches → enabled
+        XCTAssertEqual(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).count,
+            1
+        )
+
+        // linux matches → enabled
+        XCTAssertEqual(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .linux),
+                targetEnvironment: .init(platform: .macOS)
+            ).count,
+            1
+        )
+
+        // windows doesn't match → disabled
+        XCTAssertTrue(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .windows),
+                targetEnvironment: .init(platform: .macOS)
+            ).isEmpty
+        )
+    }
+
+    func testConditionalPluginStillResolves() throws {
+        let fileSystem = InMemoryFileSystem(emptyFiles:
+            "/Foo/Sources/Foo/source.swift",
+            "/Bar/Plugins/BarPlugin/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+
+        let graph = try loadModulesGraph(
+            fileSystem: fileSystem,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Foo",
+                    path: "/Foo",
+                    dependencies: [
+                        .fileSystem(
+                            identity: .plain("bar"),
+                            nameForTargetDependencyResolutionOnly: "Bar",
+                            path: "/Bar",
+                            productFilter: .everything
+                        )
+                    ],
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"])
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Foo",
+                            type: .regular,
+                            pluginUsages: [
+                                .plugin(
+                                    name: "BarPlugin",
+                                    package: "Bar",
+                                    condition: .init(hostPlatformNames: ["windows"])
+                                )
+                            ]
+                        )
+                    ]
+                ),
+                Manifest.createFileSystemManifest(
+                    displayName: "Bar",
+                    path: "/Bar",
+                    products: [
+                        ProductDescription(name: "BarPlugin", type: .plugin, targets: ["BarPlugin"])
+                    ],
+                    targets: [
+                        TargetDescription(name: "BarPlugin", type: .plugin, pluginCapability: .buildTool),
+                    ]
+                ),
+            ],
+            observabilityScope: observability.topScope
+        )
+
+        // Plugin condition is false (host is not windows), but package should still resolve
+        XCTAssertNoDiagnostics(observability.diagnostics)
+        XCTAssertTrue(graph.packages.contains { $0.manifest.displayName == "Bar" })
+
+        // Plugin should NOT be returned for non-matching host
+        XCTAssertTrue(
+            graph.pluginsPerModule(
+                satisfyingHost: .init(platform: .macOS),
+                targetEnvironment: .init(platform: .macOS)
+            ).isEmpty
+        )
+    }
+
     func testUnsupportedDependencyProduct() async throws {
         // Only run the test if the environment in which we're running actually supports Swift concurrency (which the plugin APIs require).
         try XCTSkipIf(!UserToolchain.default.supportsSwiftConcurrency(), "skipping because test environment doesn't support concurrency")

@@ -168,11 +168,11 @@ public final class ResolvedTargetResultXCTest {
     }
 
     public func check(dependencies: String..., file: StaticString = #file, line: UInt = #line) {
-        XCTAssertEqual(Set(dependencies), Set(target.dependencies.map(\.name) + target.pluginUsages.map(\.name)), file: file, line: line)
+        XCTAssertEqual(Set(dependencies), Set(target.dependencies.map(\.name)), file: file, line: line)
     }
 
     public func check(dependencies: [String], file: StaticString = #file, line: UInt = #line) {
-        XCTAssertEqual(Set(dependencies), Set(target.dependencies.map(\.name) + target.pluginUsages.map(\.name)), file: file, line: line)
+        XCTAssertEqual(Set(dependencies), Set(target.dependencies.map(\.name)), file: file, line: line)
     }
 
     public func checkDependency(

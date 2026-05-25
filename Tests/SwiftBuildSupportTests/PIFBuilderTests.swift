@@ -67,7 +67,7 @@ fileprivate func withGeneratedPIF(
     let buildParameters = if let buildParameters {
         buildParameters
     } else {
-        mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+        mockBuildParameters(destination: .target, buildSystemKind: .swiftbuild)
     }
     try await fixture(name: fixtureName) { fixturePath in
         let observabilitySystem: TestingObservability = ObservabilitySystem.makeForTesting(verbose: false)
@@ -97,8 +97,10 @@ fileprivate func withGeneratedPIF(
             fileSystem: localFileSystem,
             observabilityScope: observabilitySystem.topScope
         )
+        let hostBuildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await builder.constructPIF(
-            buildParameters: buildParameters
+            targetBuildParameters: buildParameters,
+            hostBuildParameters: hostBuildParameters
         )
         try await doIt(pif, observabilitySystem)
     }
@@ -389,7 +391,8 @@ struct PIFBuilderTests {
 
         // Act
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            targetBuildParameters: mockBuildParameters(destination: .target, buildSystemKind: .swiftbuild),
+            hostBuildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         )
 
         // Assert
@@ -902,7 +905,8 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            targetBuildParameters: mockBuildParameters(destination: .target, buildSystemKind: .swiftbuild),
+            hostBuildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         )
 
         let remoteProject = try pif.workspace.project(named: "remote-pkg")
@@ -1040,7 +1044,8 @@ struct PIFBuilderTests {
         )
 
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            targetBuildParameters: mockBuildParameters(destination: .target, buildSystemKind: .swiftbuild),
+            hostBuildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         )
 
         let project = try pif.workspace.project(named: "Root")
@@ -1150,7 +1155,8 @@ struct PIFBuilderTests {
         )
 
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            targetBuildParameters: mockBuildParameters(destination: .target, buildSystemKind: .swiftbuild),
+            hostBuildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         )
 
         let project = try pif.workspace.project(named: "Pkg")

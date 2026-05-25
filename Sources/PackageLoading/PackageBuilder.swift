@@ -807,11 +807,19 @@ public final class PackageBuilder {
                 }
             } ?? []
 
-            // Create the target.
+            // Create the target, adding the inferred dependencies from plugin usages to the declared dependencies.
+            let pluginDependencies: [Module.Dependency] = pluginUsages.map { usage in
+                switch usage {
+                case .module(let module, _):
+                    return .module(module, conditions: [])
+                case .product(let product, _):
+                    return .product(product, conditions: [])
+                }
+            }
             let target = try createTarget(
                 potentialModule: potentialModule,
                 manifestTarget: manifestTarget,
-                dependencies: dependencies,
+                dependencies: dependencies + pluginDependencies,
                 pluginUsages: pluginUsages
             )
             // Add the created target to the map or print no sources warning.
