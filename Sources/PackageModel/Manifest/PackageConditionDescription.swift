@@ -48,9 +48,7 @@ public struct PackageConditionDescription: Codable, Hashable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(platformNames, forKey: .platformNames)
-        if !hostPlatformNames.isEmpty {
-            try container.encode(hostPlatformNames, forKey: .hostPlatformNames)
-        }
+        try container.encode(hostPlatformNames, forKey: .hostPlatformNames)
         try container.encodeIfPresent(config, forKey: .config)
         try container.encodeIfPresent(traits?.sorted(), forKey: .traits)
     }

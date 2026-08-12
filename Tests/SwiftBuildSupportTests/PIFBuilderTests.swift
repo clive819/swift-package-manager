@@ -58,17 +58,6 @@ extension PIFBuilderParameters {
     }
 }
 
-extension PIFBuilder {
-    func constructPIF(
-        buildParameters: BuildParameters
-    ) async throws -> (SwiftBuildSupport.PIF.TopLevelObject, [PackagePIFBuilder.ModuleOrProduct]) {
-        try await self.constructPIF(
-            buildParameters: buildParameters,
-            hostBuildParameters: buildParameters
-        )
-    }
-}
-
 fileprivate func withGeneratedPIF(
     fromFixture fixtureName: String,
     withPackage packageName: String? = nil,
@@ -117,7 +106,8 @@ fileprivate func withGeneratedPIF(
             observabilityScope: observabilitySystem.topScope
         )
         let (pif, _) = try await builder.constructPIF(
-            buildParameters: buildParameters
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
         try await doIt(pif, observabilitySystem, fixturePath)
     }
@@ -407,8 +397,10 @@ struct PIFBuilderTests {
         )
 
         // Act
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         // Assert
@@ -814,8 +806,10 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
 
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
         #expect(!observability.hasErrorDiagnostics)
 
@@ -890,8 +884,10 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
 
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (_, metadata) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
         #expect(!observability.hasErrorDiagnostics)
 
@@ -1018,8 +1014,10 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
 
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
         #expect(!observability.hasErrorDiagnostics)
 
@@ -1071,8 +1069,10 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
 
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
         #expect(!observability.hasErrorDiagnostics)
 
@@ -1129,8 +1129,10 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
 
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
         #expect(!observability.hasErrorDiagnostics)
 
@@ -1186,8 +1188,10 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
 
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
         #expect(!observability.hasErrorDiagnostics)
 
@@ -1536,8 +1540,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let remoteProject = try pif.workspace.project(named: "remote-pkg")
@@ -1674,8 +1680,10 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
 
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let project = try pif.workspace.project(named: "Root")
@@ -1813,8 +1821,10 @@ struct PIFBuilderTests {
             observabilityScope: observability.topScope
         )
 
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let project = try pif.workspace.project(named: "Pkg")
@@ -2034,8 +2044,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let errors = observability.diagnostics.filter { $0.severity == .error }
@@ -2095,8 +2107,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let errors = observability.diagnostics.filter { $0.severity == .error }
@@ -2161,8 +2175,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let errors = observability.diagnostics.filter { $0.severity == .error }
@@ -2232,8 +2248,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let errors = observability.diagnostics.filter { $0.severity == .error }
@@ -2303,8 +2321,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let errors = observability.diagnostics.filter { $0.severity == .error }
@@ -2375,8 +2395,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let errors = observability.diagnostics.filter { $0.severity == .error }
@@ -2447,8 +2469,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let errors = observability.diagnostics.filter { $0.severity == .error }
@@ -2547,8 +2571,10 @@ struct PIFBuilderTests {
             fileSystem: fs,
             observabilityScope: observability.topScope
         )
+        let buildParameters = mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
         let (pif, _) = try await pifBuilder.constructPIF(
-            buildParameters: mockBuildParameters(destination: .host, buildSystemKind: .swiftbuild)
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
         )
 
         let errors = observability.diagnostics.filter { $0.severity == .error }
