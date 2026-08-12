@@ -58,6 +58,17 @@ extension PIFBuilderParameters {
     }
 }
 
+extension PIFBuilder {
+    func constructPIF(
+        buildParameters: BuildParameters
+    ) async throws -> (SwiftBuildSupport.PIF.TopLevelObject, [PackagePIFBuilder.ModuleOrProduct]) {
+        try await self.constructPIF(
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
+        )
+    }
+}
+
 fileprivate func withGeneratedPIF(
     fromFixture fixtureName: String,
     withPackage packageName: String? = nil,
@@ -2554,6 +2565,331 @@ struct PIFBuilderTests {
             "Expected MyPlugin to depend on my-tool-product from ToolPkg. Actual dependencies: \(pluginTarget.common.dependencies.map(\.targetId.value))"
         )
     }
+
+    @Test
+    func conditionalPluginUsageAppliesPlatformFiltersInPIF() async throws {
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Pkg/Sources/Lib/source.swift",
+            "/Pkg/Plugins/Generator/plugin.swift",
+            "/tmp/generated.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+        let graph = try loadModulesGraph(
+            fileSystem: fs,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Pkg",
+                    path: "/Pkg",
+                    toolsVersion: .v6_5,
+                    products: [
+                        ProductDescription(name: "Lib", type: .library(.automatic), targets: ["Lib"]),
+                    ],
+                    targets: [
+                        TargetDescription(
+                            name: "Lib",
+                            pluginUsages: [
+                                .plugin(
+                                    name: "Generator",
+                                    package: nil,
+                                    condition: .init(platformNames: ["ios"])
+                                ),
+                            ]
+                        ),
+                        TargetDescription(
+                            name: "Generator",
+                            type: .plugin,
+                            pluginCapability: .buildTool
+                        ),
+                    ]
+                ),
+            ],
+            observabilityScope: observability.topScope
+        )
+        let buildParameters = mockBuildParameters(
+            destination: .host,
+            environment: .init(platform: .macOS, configuration: .debug),
+            buildSystem: .swiftbuild
+        )
+        let builder = PIFBuilder(
+            graph: graph,
+            parameters: try PIFBuilderParameters.constructDefaultParametersForTesting(
+                temporaryDirectory: "/tmp",
+                addLocalRpaths: .always,
+                pluginScriptRunner: BuildCommandPluginScriptRunner()
+            ),
+            fileSystem: fs,
+            observabilityScope: observability.topScope
+        )
+
+        let (pif, _) = try await builder.constructPIF(
+            buildParameters: buildParameters,
+            hostBuildParameters: buildParameters
+        )
+        #expect(!observability.hasErrorDiagnostics, "Unexpected errors: \(observability.errors)")
+
+        let target = try pif.workspace.project(named: "Pkg").target(named: "Lib")
+        let expectedFilters: Set<ProjectModel.PlatformFilter> = [
+            .init(platform: "ios"),
+            .init(platform: "ios", environment: "simulator"),
+        ]
+        let task = try #require(target.common.customTasks.first {
+            $0.outputFilePaths.contains("/tmp/generated.swift")
+        })
+        #expect(task.platformFilters == expectedFilters)
+
+        let buildFiles = target.common.buildPhases.flatMap { phase -> [ProjectModel.BuildFile] in
+            switch phase {
+            case .headers(let phase): phase.common.files
+            case .sources(let phase): phase.common.files
+            case .frameworks(let phase): phase.common.files
+            case .copyBundleResources(let phase): phase.common.files
+            case .copyFiles(let phase): phase.common.files
+            case .shellScript(let phase): phase.common.files
+            }
+        }
+        #expect(buildFiles.contains { $0.platformFilters == expectedFilters })
+    }
+
+    @Test
+    func pluginTargetPlatformFiltersApplyToCommandsAndGeneratedOutputs() throws {
+        let generatedSource: AbsolutePath = "/tmp/generated.swift"
+        let generatedResource: AbsolutePath = "/tmp/generated.xcstrings"
+        let generatedPrebuildSource: AbsolutePath = "/tmp/prebuild.swift"
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Pkg/Sources/Lib/source.swift",
+            generatedSource.pathString,
+            generatedResource.pathString,
+            generatedPrebuildSource.pathString
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+        let graph = try loadModulesGraph(
+            fileSystem: fs,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Pkg",
+                    path: "/Pkg",
+                    toolsVersion: .v6_5,
+                    products: [
+                        ProductDescription(name: "Lib", type: .library(.automatic), targets: ["Lib"]),
+                    ],
+                    targets: [TargetDescription(name: "Lib")]
+                ),
+            ],
+            observabilityScope: observability.topScope
+        )
+        let package = try #require(graph.rootPackages.first)
+        let platformFilters: Set<ProjectModel.PlatformFilter> = [
+            .init(platform: "ios"),
+        ]
+        let pluginResult = PackagePIFBuilder.BuildToolPluginInvocationResult(
+            prebuildCommandOutputPaths: [generatedPrebuildSource],
+            buildCommands: [
+                .init(
+                    displayName: "Generate conditional outputs",
+                    executable: "/bin/generator",
+                    arguments: [],
+                    environment: [:],
+                    workingDir: "/Pkg",
+                    inputPaths: [],
+                    outputPaths: [generatedSource.pathString, generatedResource.pathString],
+                    pluginOutputDir: "/tmp/plugin-output",
+                    sandboxProfile: nil
+                ),
+            ],
+            platformFilters: platformFilters
+        )
+        let delegate = PromotingBuildDelegate(package: package, promotedProductType: nil)
+        let builder = PackagePIFBuilder(
+            modulesGraph: graph,
+            resolvedPackage: package,
+            packageManifest: package.manifest,
+            delegate: delegate,
+            buildToolPluginResultsByTargetName: ["Lib": [pluginResult]],
+            hostBuildEnvironment: .init(platform: .macOS),
+            shouldPreserveSymlinks: false,
+            packageDisplayVersion: package.manifest.displayName,
+            pkgConfigDirectories: [],
+            fileSystem: fs,
+            observabilityScope: observability.topScope
+        )
+
+        _ = try builder.build()
+        #expect(!observability.hasErrorDiagnostics, "Unexpected errors: \(observability.errors)")
+
+        let project = builder.pifProject
+        let commandOutputPaths = Set([generatedSource, generatedResource])
+        let generatedOutputPaths = commandOutputPaths.union([generatedPrebuildSource])
+        let matchingTasks = project.targets.flatMap { $0.common.customTasks }.filter {
+            !commandOutputPaths.isDisjoint(with: $0.outputFilePaths.compactMap {
+                try? AbsolutePath(validating: $0)
+            })
+        }
+        #expect(!matchingTasks.isEmpty)
+        #expect(matchingTasks.allSatisfy { $0.platformFilters == platformFilters })
+
+        let buildFiles = project.targets.flatMap { target in
+            target.common.buildPhases.flatMap { phase -> [ProjectModel.BuildFile] in
+                switch phase {
+                case .headers(let phase): phase.common.files
+                case .sources(let phase): phase.common.files
+                case .frameworks(let phase): phase.common.files
+                case .copyBundleResources(let phase): phase.common.files
+                case .copyFiles(let phase): phase.common.files
+                case .shellScript(let phase): phase.common.files
+                }
+            }
+        }
+        let filteredGeneratedPaths = Set(buildFiles.compactMap { buildFile -> AbsolutePath? in
+            guard buildFile.platformFilters == platformFilters,
+                  case .reference(let id) = buildFile.ref
+            else {
+                return nil
+            }
+            return try? project.mainGroup.findSource(ref: id)
+        })
+        #expect(filteredGeneratedPaths.isSuperset(of: generatedOutputPaths))
+
+        let normalSource = try #require(buildFiles.first { buildFile in
+            guard case .reference(let id) = buildFile.ref else {
+                return false
+            }
+            return (try? project.mainGroup.findSource(ref: id)) == "/Pkg/Sources/Lib/source.swift"
+        })
+        #expect(normalSource.platformFilters.isEmpty)
+
+        let filteredResourcePaths = Set(project.targets.flatMap { target in
+            target.common.buildPhases.flatMap { phase -> [ProjectModel.BuildFile] in
+                guard case .copyBundleResources(let phase) = phase else {
+                    return []
+                }
+                return phase.common.files
+            }
+        }.compactMap { buildFile -> AbsolutePath? in
+            guard buildFile.platformFilters == platformFilters,
+                  case .reference(let id) = buildFile.ref
+            else {
+                return nil
+            }
+            return try? project.mainGroup.findSource(ref: id)
+        })
+        #expect(filteredResourcePaths.contains(generatedResource))
+    }
+
+    @Test
+    func hostPlatformConditionFiltersPIFTargetDependency() throws {
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Pkg/Sources/Foo/source.swift",
+            "/Pkg/Sources/Bar/source.swift"
+        )
+        let observability = ObservabilitySystem.makeForTesting()
+        let graph = try loadModulesGraph(
+            fileSystem: fs,
+            manifests: [
+                Manifest.createRootManifest(
+                    displayName: "Pkg",
+                    path: "/Pkg",
+                    products: [
+                        ProductDescription(name: "Foo", type: .library(.automatic), targets: ["Foo"]),
+                    ],
+                    targets: [
+                        TargetDescription(name: "Foo", dependencies: [
+                            .target(
+                                name: "Bar",
+                                condition: .init(hostPlatformNames: ["linux"])
+                            ),
+                        ]),
+                        TargetDescription(name: "Bar"),
+                    ]
+                ),
+            ],
+            observabilityScope: observability.topScope
+        )
+        let package = try #require(graph.rootPackages.first)
+        let delegate = PromotingBuildDelegate(package: package, promotedProductType: nil)
+        let builder = PackagePIFBuilder(
+            modulesGraph: graph,
+            resolvedPackage: package,
+            packageManifest: package.manifest,
+            delegate: delegate,
+            buildToolPluginResultsByTargetName: [String: [PackagePIFBuilder.BuildToolPluginInvocationResult]](),
+            hostBuildEnvironment: .init(platform: .macOS),
+            shouldPreserveSymlinks: false,
+            packageDisplayVersion: package.manifest.displayName,
+            pkgConfigDirectories: [],
+            fileSystem: fs,
+            observabilityScope: observability.topScope
+        )
+
+        _ = try builder.build()
+        #expect(!observability.hasErrorDiagnostics, "Unexpected errors: \(observability.errors)")
+
+        let project = builder.pifProject
+        let foo = try #require(project.targets.first { $0.common.name == "Foo" })
+        let bar = try #require(project.targets.first { $0.common.name == "Bar" })
+        #expect(!foo.common.dependencies.contains { $0.targetId == bar.common.id })
+    }
+}
+
+private struct BuildCommandPluginScriptRunner: PluginScriptRunner {
+    var hostTriple: Triple {
+        get throws { try UserToolchain.default.targetTriple }
+    }
+
+    func compilePluginScript(
+        sourceFiles: [AbsolutePath],
+        pluginName: String,
+        toolsVersion: ToolsVersion,
+        workers: UInt32,
+        observabilityScope: ObservabilityScope,
+        callbackQueue: DispatchQueue,
+        delegate: any PluginScriptCompilerDelegate,
+        completion: @escaping (Result<PluginCompilationResult, any Error>) -> Void
+    ) {
+        callbackQueue.sync { completion(.failure(StringError("unimplemented"))) }
+    }
+
+    func buildCommandLine(
+        sourceFiles: [AbsolutePath],
+        pluginName: String,
+        toolsVersion: ToolsVersion,
+        workers: UInt32,
+        observabilityScope: ObservabilityScope?
+    ) -> (commandLine: [String], execName: String, execFilePath: AbsolutePath, diagFilePath: AbsolutePath) {
+        fatalError("Not implemented")
+    }
+
+    func runPluginScript(
+        sourceFiles: [AbsolutePath],
+        pluginName: String,
+        initialMessage: Data,
+        toolsVersion: ToolsVersion,
+        workingDirectory: AbsolutePath,
+        writableDirectories: [AbsolutePath],
+        readOnlyDirectories: [AbsolutePath],
+        allowNetworkConnections: [SandboxNetworkPermission],
+        workers: UInt32,
+        fileSystem: any FileSystem,
+        observabilityScope: ObservabilityScope,
+        callbackQueue: DispatchQueue,
+        delegate: any PluginScriptCompilerDelegate & PluginScriptRunnerDelegate
+    ) async throws -> Int32 {
+        let buildCommand = Data("""
+            { "defineBuildCommand": {
+                "configuration": {
+                    "version": 2,
+                    "displayName": "Generate a source",
+                    "executable": "file:///bin/generator",
+                    "arguments": [],
+                    "workingDirectory": "file:///Pkg",
+                    "environment": {}
+                },
+                "inputFiles": [],
+                "outputFiles": ["file:///tmp/generated.swift"]
+            } }
+            """.utf8)
+        _ = try await delegate.handleMessage(data: buildCommand)
+        return 0
+    }
 }
 
 /// A no-op plugin script runner for use in PIF builder tests that need a plugin in the graph
@@ -2728,6 +3064,7 @@ private func buildAppProject(
         packageManifest: rootPackage.manifest,
         delegate: delegate,
         buildToolPluginResultsByTargetName: [String: [PackagePIFBuilder.BuildToolPluginInvocationResult]](),
+        hostBuildEnvironment: .init(platform: .macOS),
         shouldPreserveSymlinks: false,
         packageDisplayVersion: rootPackage.manifest.displayName,
         pkgConfigDirectories: [],
